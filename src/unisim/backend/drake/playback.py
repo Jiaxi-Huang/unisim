@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from os import PathLike
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Sequence, TypeVar
 
 import numpy as np
 
@@ -29,6 +29,9 @@ def run_drake_playback(
     camera_kwargs: CameraCfg | Mapping[str, Any] | None,
     debug_overlay_getter: DebugOverlayGetter | None = None,
     on_frame: Callable[[int, np.ndarray], np.ndarray | None] | None = None,
+    extra_data_getter: Callable[[], np.ndarray | None] | None = None,
+    ghost_state_getter: Callable[[], np.ndarray | None] | None = None,
+    ghost_joint_names: Sequence[str] | None = None,
 ) -> str | None:
     """Run Drake physics playback and optionally render it with MuJoCo.
 
@@ -51,6 +54,9 @@ def run_drake_playback(
             camera_kwargs=camera_kwargs,
             debug_overlay_getter=debug_overlay_getter,
             on_frame=on_frame,
+            extra_data_getter=extra_data_getter,
+            ghost_state_getter=ghost_state_getter,
+            ghost_joint_names=ghost_joint_names,
         )
     if not headless:
         raise NotImplementedError("Drake playback does not support interactive rendering yet.")

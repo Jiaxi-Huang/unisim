@@ -3286,6 +3286,9 @@ class MjwarpBackend(SimBackend):
         camera_kwargs: CameraCfg | Mapping[str, Any] | None = None,
         debug_overlay_getter: DebugOverlayGetter | None = None,
         on_frame: Any = None,
+        extra_data_getter: Any = None,
+        ghost_state_getter: Any = None,
+        ghost_joint_names: Any = None,
     ) -> str | None:
         del render_offset_mode
         camera = CameraCfg.from_kwargs(camera_kwargs)
@@ -3306,6 +3309,9 @@ class MjwarpBackend(SimBackend):
             camera_kwargs=camera,
             debug_overlay_getter=debug_overlay_getter,
             on_frame=on_frame,
+            extra_data_getter=extra_data_getter,
+            ghost_state_getter=ghost_state_getter,
+            ghost_joint_names=ghost_joint_names,
         )
 
     def get_physics_state_layout(self) -> PhysicsStateLayout:

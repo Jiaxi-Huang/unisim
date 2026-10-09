@@ -6,7 +6,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from os import PathLike
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Sequence, TypeVar
 
 import numpy as np
 
@@ -40,9 +40,19 @@ def run_mujoco_playback(
     camera_kwargs: CameraCfg | Mapping[str, Any] | None,
     debug_overlay_getter: DebugOverlayGetter | None = None,
     on_frame: Callable[[int, np.ndarray], np.ndarray | None] | None = None,
+    extra_data_getter: Callable[[], np.ndarray | None] | None = None,
+    ghost_state_getter: Callable[[], np.ndarray | None] | None = None,
+    ghost_joint_names: Sequence[str] | None = None,
 ) -> str | None:
     if not headless:
         raise NotImplementedError("MuJoCo play mode does not support interactive rendering here.")
+    if headless and not record_video:
+        if num_steps is None:
+            raise ValueError("Headless playback requires a finite num_steps value.")
+        obs = initialize()
+        for _ in range(num_steps):
+            obs = step(obs)
+        return None
     if not record_video:
         raise ValueError("MuJoCo play rendering requires record_video=true.")
     if num_steps is None:
@@ -57,10 +67,26 @@ def run_mujoco_playback(
     obs = initialize()
     state_list = []
     overlay_list: list[Sequence[Sequence[DebugPrimitive] | None] | None] = []
+    marker_list: list[np.ndarray | None] = []
+    ghost_list: list[np.ndarray | None] = []
     for _ in range(num_steps):
         obs = step(obs)
         state_list.append(np.asarray(frame_state_getter(), dtype=np.float32).copy())
         overlay_list.append(debug_overlay_getter() if debug_overlay_getter is not None else None)
+        if extra_data_getter is not None:
+            marker = extra_data_getter()
+            marker_list.append(
+                np.asarray(marker, dtype=np.float32).copy() if marker is not None else None
+            )
+        else:
+            marker_list.append(None)
+        if ghost_state_getter is not None:
+            ghost = ghost_state_getter()
+            ghost_list.append(
+                np.asarray(ghost, dtype=np.float32).copy() if ghost is not None else None
+            )
+        else:
+            ghost_list.append(None)
 
     num_envs = int(state_list[0].shape[0])
     validated_overlays = [
@@ -69,6 +95,10 @@ def run_mujoco_playback(
     debug_overlays_list = (
         validated_overlays if any(overlays is not None for overlays in validated_overlays) else None
     )
+    marker_positions_list = (
+        marker_list if any(marker is not None for marker in marker_list) else None
+    )
+    ghost_qpos_list = ghost_list if any(g is not None for g in ghost_list) else None
 
     from unisim.visualization import render_many
 
@@ -98,6 +128,9 @@ def run_mujoco_playback(
                 cam_fov=camera.cam_fov,
                 render_spacing=effective_spacing,
                 debug_overlays_list=debug_overlays_list,
+                marker_positions_list=marker_positions_list,
+                ghost_qpos_list=ghost_qpos_list,
+                ghost_joint_names=ghost_joint_names,
             )
         else:
             frames = render_many.render_states_get_frames(
@@ -113,6 +146,9 @@ def run_mujoco_playback(
                 cam_fov=camera.cam_fov,
                 render_spacing=effective_spacing,
                 debug_overlays_list=debug_overlays_list,
+                marker_positions_list=marker_positions_list,
+                ghost_qpos_list=ghost_qpos_list,
+                ghost_joint_names=ghost_joint_names,
             )
 
     if not frames:

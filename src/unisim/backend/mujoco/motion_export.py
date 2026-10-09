@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from unisim.backend.mujoco.xml import inject_mujoco_tracking_sensors
+from unisim.utils.rotation import np_quat_apply_inverse_batched
 
 _SENSOR_DIMS = (3, 4, 3, 3)
 _SENSOR_PREFIXES = (
@@ -56,7 +57,9 @@ def compute_tracking_fk(
         Dict with float32 arrays ``joint_pos`` / ``joint_vel``
         (N, len(joint_names)) and ``body_pos_w`` / ``body_quat_w`` /
         ``body_lin_vel_w`` / ``body_ang_vel_w`` (N, nbody, ...) in MuJoCo
-        body-id layout, including the implicit world body 0.
+        body-id layout, including the implicit world body 0.  Body velocities
+        are world-frame; the world-frame ``base_ang_vels`` input is rotated
+        into the body-local free-joint ``qvel[3:6]`` slot before replay.
     """
     import mujoco
 
@@ -103,12 +106,18 @@ def compute_tracking_fk(
 
         frame_iter = tqdm(frame_iter, desc=progress_desc, leave=progress_desc is None)
 
+    rots64 = np.asarray(base_rots, dtype=np.float64)
+    rots64 = rots64 / np.maximum(np.linalg.norm(rots64, axis=-1, keepdims=True), 1e-12)
+    base_ang_vels_local = np_quat_apply_inverse_batched(
+        rots64, np.asarray(base_ang_vels, dtype=np.float64)
+    ).astype(np.float32)
+
     for i in frame_iter:
         # Set root state
         data.qpos[0:3] = base_poss[i]
         data.qpos[3:7] = base_rots[i]
         data.qvel[0:3] = base_lin_vels[i]
-        data.qvel[3:6] = base_ang_vels[i]
+        data.qvel[3:6] = base_ang_vels_local[i]
 
         # Set joint states
         for j, jnt_id in enumerate(joint_indices):

@@ -1023,7 +1023,7 @@ class BackendHeightScanner(abc.ABC):
         """Return sampled values with shape ``(num_envs, num_points)``."""
 
 
-PLAY_RENDER_MODES = frozenset({"auto", "interactive", "record", "none"})
+PLAY_RENDER_MODES = frozenset({"auto", "interactive", "record", "headless", "none"})
 
 
 @dataclass(frozen=True)
@@ -1064,7 +1064,10 @@ def log_playback_plan(plan: BackendPlayRenderPlan, *, prefix: str = "") -> None:
         print(f"{prefix}Use the renderer window or browser URL reported by the backend.")
     else:
         print(f"{prefix}Running playback without video recording...")
-    print(f"{prefix}Rendering playback frames...")
+    if plan.mode == "headless":
+        print(f"{prefix}Running headless playback steps...")
+    else:
+        print(f"{prefix}Rendering playback frames...")
 
 
 class SimBackend(abc.ABC):
@@ -1854,6 +1857,9 @@ class SimBackend(abc.ABC):
         camera_kwargs: CameraCfg | Mapping[str, Any] | None = None,
         debug_overlay_getter: DebugOverlayGetter | None = None,
         on_frame: Callable[[int, np.ndarray], np.ndarray | None] | None = None,
+        extra_data_getter: Callable[[], np.ndarray | None] | None = None,
+        ghost_state_getter: Callable[[], np.ndarray | None] | None = None,
+        ghost_joint_names: Sequence[str] | None = None,
     ) -> str | None:
         """Execute backend-owned playback for an env wrapper.
 
@@ -1887,6 +1893,11 @@ class SimBackend(abc.ABC):
         yet. The parameter stays on this contract until playback asset/config
         resolution moves onto backend-owned metadata; backends must only use
         it on the cold playback path.
+
+        ``ghost_state_getter`` returns optional ``(num_envs, 7 + n_joints)``
+        rows of ``[root_pos, root_quat wxyz, joint_pos]`` per step, with
+        ``ghost_joint_names`` naming the joint columns; backends that cannot
+        composite an overlay robot ignore both.
         """
         raise NotImplementedError(f"{self.__class__.__name__} does not support playback execution")
 

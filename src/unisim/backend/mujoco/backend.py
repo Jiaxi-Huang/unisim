@@ -3231,6 +3231,18 @@ class MuJoCoBackend(SimBackend):
             )
         if effective_mode == "interactive":
             raise NotImplementedError("MuJoCo playback does not support interactive rendering.")
+        if effective_mode == "headless":
+            if play_steps is None:
+                raise ValueError(
+                    "MuJoCo headless playback requires a finite training.play_steps value."
+                )
+            return BackendPlayRenderPlan(
+                mode=effective_mode,
+                headless=True,
+                record_video=False,
+                num_steps=int(play_steps),
+                output_video=None,
+            )
         assert effective_mode == "record"
         if play_steps is None:
             raise ValueError("MuJoCo record playback requires a finite training.play_steps value.")
@@ -3260,6 +3272,9 @@ class MuJoCoBackend(SimBackend):
         camera_kwargs: CameraCfg | Mapping[str, Any] | None = None,
         debug_overlay_getter: DebugOverlayGetter | None = None,
         on_frame=None,
+        extra_data_getter=None,
+        ghost_state_getter=None,
+        ghost_joint_names=None,
     ) -> str | None:
         del render_offset_mode
         camera = CameraCfg.from_kwargs(camera_kwargs)
@@ -3280,6 +3295,9 @@ class MuJoCoBackend(SimBackend):
             camera_kwargs=camera,
             debug_overlay_getter=debug_overlay_getter,
             on_frame=on_frame,
+            extra_data_getter=extra_data_getter,
+            ghost_state_getter=ghost_state_getter,
+            ghost_joint_names=ghost_joint_names,
         )
 
     # ------------------------------------------------------------------ #

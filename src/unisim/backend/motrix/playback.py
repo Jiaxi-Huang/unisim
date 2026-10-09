@@ -32,6 +32,14 @@ def run_motrix_playback(
     if record_video and not headless:
         raise ValueError("Motrix video recording requires headless=true.")
 
+    if headless and not record_video:
+        if num_steps is None:
+            raise ValueError("Headless playback requires a finite num_steps value.")
+        obs = initialize()
+        for _ in range(num_steps):
+            obs = step(obs)
+        return None
+
     if headless or record_video:
         if num_steps is None:
             raise ValueError("Motrix captured playback requires a finite num_steps value.")

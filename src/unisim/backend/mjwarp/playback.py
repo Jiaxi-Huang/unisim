@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from os import PathLike
 from typing import Any, TypeVar
 
@@ -56,6 +56,9 @@ def run_mjwarp_playback(
     camera_kwargs: CameraCfg | Mapping[str, Any] | None,
     debug_overlay_getter: DebugOverlayGetter | None = None,
     on_frame: Callable[[int, np.ndarray], np.ndarray | None] | None = None,
+    extra_data_getter: Callable[[], np.ndarray | None] | None = None,
+    ghost_state_getter: Callable[[], np.ndarray | None] | None = None,
+    ghost_joint_names: Sequence[str] | None = None,
 ) -> str | None:
     """Render detached mjwarp host snapshots with the existing MuJoCo pipeline."""
     if not headless:

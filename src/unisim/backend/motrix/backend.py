@@ -999,6 +999,24 @@ class MotrixBackend(SimBackend):
             # TODO: switch to motrixsim model-level actuator gain API once available.
             self._default_actuator_kp[idx] = _first_scalar(actuator.get_kp_override(self._data))
             self._default_actuator_kd[idx] = _first_scalar(actuator.get_kd_override(self._data))
+        self._default_dof_armature = np.zeros((int(self._model.num_dof_vel),), dtype=np.float32)
+        armature_joints: list[tuple["mtx.Joint", int]] = []
+        for joint in self._model.joints:
+            if int(joint.num_dof_vel) != 1:
+                continue
+            dof_index = int(joint.dof_vel_index)
+            self._default_dof_armature[dof_index] = float(joint.armature)
+            armature_joints.append((joint, dof_index))
+        self._armature_joints = tuple(armature_joints)
+        self._dof_armature_mapped = np.zeros((int(self._model.num_dof_vel),), dtype=bool)
+        if self._armature_joints:
+            self._dof_armature_mapped[
+                np.asarray([index for _, index in self._armature_joints], dtype=np.intp)
+            ] = True
+        self._supports_dof_armature_override = bool(self._armature_joints) and all(
+            callable(getattr(joint, "set_armature_override", None))
+            for joint, _ in self._armature_joints
+        )
         self._floating_base_quat_indices: tuple[np.ndarray, ...] = tuple(
             np.asarray(floating_base.dof_pos_indices[3:7], dtype=np.intp)
             for floating_base in getattr(self._model, "floating_bases", [])
@@ -3262,6 +3280,8 @@ class MotrixBackend(SimBackend):
         }
         if getattr(self, "_supports_position_actuator_gains", False):
             supported_reset_terms.update({RESET_TERM_KP, RESET_TERM_KD})
+        if getattr(self, "_supports_dof_armature_override", False):
+            supported_reset_terms.add(RESET_TERM_DOF_ARMATURE)
         if getattr(self, "_supports_geom_friction_override", False):
             supported_reset_terms.add(RESET_TERM_GEOM_FRICTION)
         if getattr(self, "_supports_gravity_override", False):
@@ -3327,6 +3347,8 @@ class MotrixBackend(SimBackend):
             value = self.get_geom_friction().astype(np.float64, copy=False)
         elif term == RESET_TERM_GRAVITY:
             value = self.get_gravity().astype(np.float64, copy=False)
+        elif term == RESET_TERM_DOF_ARMATURE:
+            value = self._default_dof_armature.astype(np.float64, copy=False)
         else:
             raise NotImplementedError(f"MotrixBackend does not expose reset term {term!r}")
         result = np.array(value, dtype=np.float64, copy=True)
@@ -3587,6 +3609,18 @@ class MotrixBackend(SimBackend):
                 num_steps=None,
                 output_video=None,
             )
+        if effective_mode == "headless":
+            if play_steps is None:
+                raise ValueError(
+                    "Motrix headless playback requires a finite training.play_steps value."
+                )
+            return BackendPlayRenderPlan(
+                mode=effective_mode,
+                headless=True,
+                record_video=False,
+                num_steps=int(play_steps),
+                output_video=None,
+            )
         assert effective_mode == "record"
         if play_steps is None:
             raise ValueError("Motrix record playback requires a finite training.play_steps value.")
@@ -3616,6 +3650,9 @@ class MotrixBackend(SimBackend):
         camera_kwargs: CameraCfg | Mapping[str, Any] | None = None,
         debug_overlay_getter=None,
         on_frame=None,
+        extra_data_getter=None,
+        ghost_state_getter=None,
+        ghost_joint_names=None,
     ) -> str | None:
         del frame_state_getter
         if debug_overlay_getter is not None:
@@ -3633,6 +3670,8 @@ class MotrixBackend(SimBackend):
             raise NotImplementedError(
                 "Motrix native playback does not support fixed-variant scenes yet"
             )
+        # The Motrix-native renderer has no reference-ghost overlay yet.
+        del extra_data_getter, ghost_state_getter, ghost_joint_names
         camera = CameraCfg.from_kwargs(camera_kwargs)
         should_record_video = (
             bool(record_video) if record_video is not None else output_video is not None
@@ -4718,6 +4757,15 @@ class MotrixBackend(SimBackend):
             )
             self._set_gravity_override(data_slice, gravity)
 
+        if randomization.dof_armature is not None:
+            dof_armature = self._coerce_reset_field(
+                randomization.dof_armature,
+                name="dof_armature",
+                num_reset=num_reset,
+                shaped_tail=(int(self._model.num_dof_vel),),
+            )
+            self._set_dof_armature_overrides(data_slice, dof_armature)
+
         if randomization.kp is not None:
             kp = np.asarray(randomization.kp, dtype=np.float32)
             expected_shape = (num_reset, self.num_actuators)
@@ -4739,6 +4787,22 @@ class MotrixBackend(SimBackend):
             data_slice,
             np.ascontiguousarray(np.asarray(gravity, dtype=np.float32)),
         )
+
+    def _set_dof_armature_overrides(self, data_slice, dof_armature: np.ndarray) -> None:
+        if not self._supports_dof_armature_override:
+            raise NotImplementedError("Motrix joint armature overrides are not available")
+        unmapped = np.logical_not(self._dof_armature_mapped)
+        if np.any(
+            np.abs(dof_armature[:, unmapped] - self._default_dof_armature[unmapped]) > 1.0e-7
+        ):
+            raise NotImplementedError(
+                "Motrix cannot override armature for floating-base or multi-DoF entries"
+            )
+        for joint, dof_index in self._armature_joints:
+            joint.set_armature_override(
+                data_slice,
+                np.ascontiguousarray(dof_armature[:, dof_index], dtype=np.float32),
+            )
 
     def _set_position_actuator_kp_override(self, data_slice, kp: np.ndarray) -> None:
         if not self._supports_position_actuator_gains:
@@ -4767,3 +4831,8 @@ class MotrixBackend(SimBackend):
                 "Motrix actuator gains are only exposed for all-position-actuator models"
             )
         return self._default_actuator_kp.copy(), self._default_actuator_kd.copy()
+
+    def get_dof_armature(self) -> np.ndarray:
+        if not self._supports_dof_armature_override:
+            raise NotImplementedError("Motrix joint armature overrides are not available")
+        return self._default_dof_armature.copy()
